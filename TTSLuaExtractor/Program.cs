@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -18,88 +19,129 @@ namespace TTSLuaExtractor
         {
             Console.WriteLine("To extract LUA from JSON save file:");
             Console.WriteLine("TTSLuaExtractor extract InputSave OutputFolder");
-            Console.WriteLine("Instead of InputSave, use 'latest' to load the most recent save ignoring the autosave slot");
+            Console.WriteLine(
+                "Instead of InputSave, use 'latest' to load the most recent save ignoring the autosave slot");
             Console.WriteLine("ex:");
-            Console.WriteLine("TTSLuaExtractor extract \"C:\\Users\\KarateSnoopy\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_51.json\" c:\\git\\myTTSboard");
+            Console.WriteLine(
+                "TTSLuaExtractor extract \"C:\\Users\\KarateSnoopy\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_51.json\" c:\\git\\myTTSboard");
             Console.WriteLine("TTSLuaExtractor extract latest c:\\git\\myTTSboard");
             Console.WriteLine("");
             Console.WriteLine("");
             Console.WriteLine("To embed LUA into JSON save file:");
-            Console.WriteLine("TTSLuaExtractor embed OutputSave InputFolder IncludeFolder");
-            Console.WriteLine("Instead of OutputSave, use 'latest' to load the most recent save ignoring the autosave slot");
+            Console.WriteLine("TTSLuaExtractor embed InputSave OutputSave InputFolder IncludeFolder");
+            Console.WriteLine(
+                "Instead of OutputSave, use 'latest' to load the most recent save ignoring the autosave slot");
             Console.WriteLine("ex:");
-            Console.WriteLine("TTSLuaExtractor embed \"C:\\Users\\KarateSnoopy\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_51.json\" c:\\git\\myTTSboard c:\\git\\myTTSboard\\shared");
+            Console.WriteLine(
+                "TTSLuaExtractor embed InputSavePath \"C:\\Users\\KarateSnoopy\\Documents\\My Games\\Tabletop Simulator\\Saves\\TS_Save_51.json\" c:\\git\\myTTSboard c:\\git\\myTTSboard\\shared");
             Console.WriteLine("TTSLuaExtractor embed latest c:\\git\\myTTSboard c:\\git\\myTTSboard\\shared");
         }
 
         static void Main(string[] args)
         {
-            if (args.Length == 0)
+            try
             {
-                ShowHelp();
-                return;
-            }
 
-            if ( args[0] == "extract" )
-            {
-                if (args.Length != 3)
+                if (args.Length == 0)
                 {
                     ShowHelp();
                     return;
                 }
 
-                ExtractLua(args);
-            }
-            else if (args[0] == "embed")
-            {
-                if (args.Length != 4)
+                if (args[0] == "extract")
+                {
+                    if (args.Length != 3)
+                    {
+                        ShowHelp();
+                        return;
+                    }
+
+                    ExtractLua(args);
+                }
+                else if (args[0] == "embed")
+                {
+                    if (args.Length != 5)
+                    {
+                        ShowHelp();
+                        return;
+                    }
+
+                    EmbedLua(args);
+                }
+                else
                 {
                     ShowHelp();
                     return;
                 }
-
-                EmbedLua(args);
             }
-            else
+            catch (Exception e)
             {
-                ShowHelp();
+                Console.WriteLine(e);
                 return;
+            }
+        }
+
+        static List<string> allFiles = new List<string>();
+
+        static void GetFiles(string path)
+        {
+            var files = Directory.GetFiles(path);
+            foreach (string file in files)
+            {
+                allFiles.Add(file);
+            }
+
+            foreach (string directory in Directory.GetDirectories(path))
+            {
+                GetFiles(directory);
             }
         }
 
         static void EmbedLua(string[] args)
         {
-            string OutputSave = args[1];
-            string InputFolder = args[2];
-            string IncludePath = args[3];
+            string InputSave = args[1];
+            string OutputSave = args[2];
+            string InputFolder = args[3];
+            string IncludePath = args[4];
             Console.WriteLine("InputFolder: " + InputFolder);
 
             if (OutputSave == "latest")
             {
                 OutputSave = GetLatestSave();
             }
-            Console.WriteLine("OutputSave: " + OutputSave);
 
-            if (!File.Exists(OutputSave))
+            Console.WriteLine("OutputSave: " + OutputSave);
+            if (!File.Exists(InputSave))
             {
-                Console.WriteLine("OutputSave doesn't exist");
+                Console.WriteLine("InputSave doesn't exist");
                 return;
             }
+
+            if (File.Exists(OutputSave))
+            {
+                Console.WriteLine("OutputSave exists! Overwrite?");
+                // return;
+            }
+
             if (!Directory.Exists(InputFolder))
             {
                 Console.WriteLine("InputFolder doesn't exist");
                 return;
             }
+
             if (!Directory.Exists(IncludePath))
             {
                 Console.WriteLine("IncludePath doesn't exist");
                 return;
             }
+
             Console.WriteLine($"IncludePath: {IncludePath}");
 
-            string json = File.ReadAllText(OutputSave);
+            GetFiles(InputFolder);
+
+            string json = File.ReadAllText(InputSave);
             dynamic d = JObject.Parse(json);
-            Console.WriteLine("SaveName: " + (string)d.SaveName);
+            Console.WriteLine("SaveName: " + (string) d.SaveName);
             EmbedLuaInObject(InputFolder, d, IncludePath, true);
             foreach (dynamic obj in d.ObjectStates)
             {
@@ -110,10 +152,30 @@ namespace TTSLuaExtractor
             File.WriteAllText(OutputSave, newTxt);
         }
 
+        static List<string> FindFileWithGuid(string guid, string extension, string inputFolder)
+        {
+            //Console.WriteLine("Searching for GUID " + guid);
+            var result = new List<string>();
+            foreach (var file in allFiles)
+            {
+                //Console.WriteLine("Considering " + file);
+                if (Path.GetFileName(file).Contains(guid))
+                {
+                    if (Path.GetExtension(file) == extension)
+                    {
+                        result.Add(file);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+
+        static List<string> embeddedGuids = new List<string>();
+
         static void EmbedLuaInObject(string inputFolder, dynamic obj, string includePath, bool isGlobal)
         {
-            bool hasLua = obj.LuaScript != "";
-            bool hasXml = obj.XmlUI != "";
             bool hasContained = obj.ContainedObjects != null;
 
             string name = obj.Nickname;
@@ -122,59 +184,97 @@ namespace TTSLuaExtractor
                 name = obj.Name;
                 if (name != null)
                 {
-                    name = name.Replace($"_", " "); // for some reason Atom doesn't change '_' to ' ' in nicknames, only names.
+                    name = name.Replace($"_",
+                        " "); // for some reason Atom doesn't change '_' to ' ' in nicknames, only names.
                 }
             }
 
-            if (hasXml)
+            if (!isGlobal)
             {
-                string inputFile;
+                List<string> matchingXML = FindFileWithGuid((string) obj.GUID, ".xml", inputFolder);
 
-                inputFile = $"{name}.{obj.GUID}.xml";
-                foreach (char c in Path.GetInvalidFileNameChars())
+                if (matchingXML.Count > 1)
                 {
-                    inputFile = inputFile.Replace($"{c}", "");
+                    Console.WriteLine("Found more than one matching XML file for object with GUID " + obj.GUID);
+                    foreach (string s in matchingXML)
+                    {
+                        Console.WriteLine(s);
+                    }
+
+                    Console.WriteLine("This is likely an error. Cowardly refusing to continue");
+                    throw new Exception("Too many files!");
                 }
 
-                if (isGlobal)
+                if (matchingXML.Count == 1)
                 {
-                    inputFile = "Global.-1.xml";
+                    Console.WriteLine($"Reading from {matchingXML[0]}");
+                    string inputFile = matchingXML[0];
+                    string content = File.ReadAllText(inputFile);
+                    obj.XmlUI = content;
+                }
+                else
+                {
+                    obj.XmlUI = "";
                 }
 
+                List<string> matchingLua = FindFileWithGuid((string) obj.GUID, ".ttslua", inputFolder);
+
+                if (matchingLua.Count > 1)
+                {
+                    Console.WriteLine("Found more than one matching Lua file for object with GUID " + obj.GUID);
+                    foreach (string s in matchingLua)
+                    {
+                        Console.WriteLine(s);
+                    }
+
+                    Console.WriteLine(
+                        "This is likely an error. If your objects have the same GUID they cannot distinguished. Please draw them apart if they are in a bag or a deck at least ONCE. Cowardly refusing to continue");
+                    throw new Exception("Too many files!");
+                }
+
+                if (matchingLua.Count == 1)
+                {
+                    string GUID = (string) obj.GUID;
+                    if (embeddedGuids.Contains(GUID))
+                    { 
+                        Console.WriteLine("Found duplicate GUID with script!");
+                        Console.WriteLine(obj.GUID);
+                        Console.WriteLine(obj.Nickname);
+                        Console.WriteLine(obj.Name);
+                        throw new Exception("Found duplicate GUID with script while embedding .... fix this please you DO NOT WANT THIS");
+                    }
+                    embeddedGuids.Add(GUID);
+                    Console.WriteLine($"Reading from {matchingLua[0]}");
+                    string lua = File.ReadAllText(matchingLua[0]);
+                    lua = UncompressIncludes(lua, "", includePath);
+                    obj.LuaScript = lua;
+                }
+                else
+                {
+                    obj.LuaScript = "";
+                }
+
+            }
+            else
+            {
+                string inputFile = "Global.-1.xml";
                 string inputFullPath = Path.Combine(inputFolder, inputFile);
                 FileInfo fi = new FileInfo(inputFullPath);
                 if (fi.Exists)
                 {
                     Console.WriteLine($"Reading from {inputFullPath}");
-                    string lua = File.ReadAllText(inputFullPath);
-                    obj.XmlUI = lua;
+                    string content = File.ReadAllText(inputFullPath);
+                    obj.XmlUI = content;
                 }
                 else
                 {
+                    obj.XmlUI = "";
                     Console.WriteLine($"XML not found.  {inputFullPath}");
                 }
-            }
 
-            if (hasLua)
-            {
-                //Console.WriteLine($"Object: {obj.GUID} LUA:{hasLua} HasContained:{hasContained} {obj.Name}, {obj.Nickname}");
-
-                string inputFile;
-
-                inputFile = $"{name}.{obj.GUID}.ttslua";
-                foreach (char c in Path.GetInvalidFileNameChars())
-                {
-                    inputFile = inputFile.Replace($"{c}", "");
-                }
-
-                if (isGlobal)
-                {
-                    inputFile = "Global.-1.ttslua";
-                }
-
-                string inputFullPath = Path.Combine(inputFolder, inputFile);
-                FileInfo fi = new FileInfo(inputFullPath);
-                if( fi.Exists )
+                inputFile = "Global.-1.ttslua";
+                inputFullPath = Path.Combine(inputFolder, inputFile);
+                if (fi.Exists)
                 {
                     Console.WriteLine($"Reading from {inputFullPath}");
                     string lua = File.ReadAllText(inputFullPath);
@@ -183,23 +283,18 @@ namespace TTSLuaExtractor
                 }
                 else
                 {
-                    Console.WriteLine($"Script not found.  {inputFullPath}");
+                    obj.LuaScript = "";
                 }
             }
 
             if (hasContained)
             {
-                string outputFolderName;
-                outputFolderName = $"{name}.{obj.GUID}";
-                foreach (char c in Path.GetInvalidFileNameChars())
-                {
-                    outputFolderName = outputFolderName.Replace($"{c}", "");
-                }
-                string subFolder = Path.Combine(inputFolder, outputFolderName);
-
+                Console.WriteLine("Handling objects inside container");
+                Console.WriteLine(obj.Nickname);
+                Console.WriteLine(obj.GUID);
                 foreach (dynamic innerObj in obj.ContainedObjects)
                 {
-                    EmbedLuaInObject(subFolder, innerObj, includePath, false);
+                    EmbedLuaInObject(inputFolder, innerObj, includePath, false);
                 }
             }
         }
@@ -223,11 +318,13 @@ namespace TTSLuaExtractor
                     dt = fi.LastWriteTime;
                     latestFile = jsonFile;
                 }
-                
+
             }
 
             return latestFile;
         }
+
+        static List<string> extractedGuids = new List<string>();
 
         static void ExtractLua(string[] args)
         {
@@ -239,6 +336,7 @@ namespace TTSLuaExtractor
             {
                 inputFile = GetLatestSave();
             }
+
             Console.WriteLine("InputSave: " + inputFile);
 
             if (!File.Exists(inputFile))
@@ -246,6 +344,7 @@ namespace TTSLuaExtractor
                 Console.WriteLine("InputFile doesn't exist");
                 return;
             }
+
             Directory.CreateDirectory(outputFolder);
             if (!Directory.Exists(outputFolder))
             {
@@ -255,7 +354,7 @@ namespace TTSLuaExtractor
 
             string json = File.ReadAllText(inputFile);
             dynamic d = JObject.Parse(json);
-            Console.WriteLine("SaveName: " + (string)d.SaveName);
+            Console.WriteLine("SaveName: " + (string) d.SaveName);
 
             ExtractLuaFromObject(outputFolder, d, true);
             foreach (dynamic obj in d.ObjectStates)
@@ -269,13 +368,13 @@ namespace TTSLuaExtractor
         }
 
         static string CompressIncludes(string lua)
-        {            
-            while(true) // Keep looking for #includes in this file until there's no more to be found
+        {
+            while (true) // Keep looking for #includes in this file until there's no more to be found
             {
                 // Looking for something like 
                 // ----#include shared/utils
                 int firstIncludeIndex = lua.IndexOf("----#include ");
-                if(firstIncludeIndex == -1)
+                if (firstIncludeIndex == -1)
                 {
                     break;
                 }
@@ -285,6 +384,7 @@ namespace TTSLuaExtractor
                 {
                     break;
                 }
+
                 string originalIncludeLine = lua.Substring(firstIncludeIndex, firstIncludeIndexEOL - firstIncludeIndex);
                 string commentedIncludeLine = originalIncludeLine.Replace("----#include ", "#include ");
 
@@ -292,9 +392,9 @@ namespace TTSLuaExtractor
                 // Everything in-between can be deleted and collapsed
                 // into a new line such as
                 // #include shared/utils
-                int nextIncludeIndex = lua.IndexOf(originalIncludeLine, firstIncludeIndexEOL+1);
+                int nextIncludeIndex = lua.IndexOf(originalIncludeLine, firstIncludeIndexEOL + 1);
                 int nextIncludeIndexEOL = lua.IndexOf("\n", nextIncludeIndex);
-                if(nextIncludeIndexEOL == -1)
+                if (nextIncludeIndexEOL == -1)
                 {
                     lua = lua.Remove(firstIncludeIndex);
                 }
@@ -362,7 +462,8 @@ namespace TTSLuaExtractor
                 else
                 {
                     commentedIncludeLine = lua.Substring(firstIncludeIndex, firstIncludeIndexEOL - firstIncludeIndex);
-                    includeFileName = lua.Substring(firstIncludeIndex + 9, firstIncludeIndexEOL - (firstIncludeIndex + 9));
+                    includeFileName = lua.Substring(firstIncludeIndex + 9,
+                        firstIncludeIndexEOL - (firstIncludeIndex + 9));
                 }
 
                 includeFileName = includeFileName.Replace("\r", "").Replace("\n", "");
@@ -375,8 +476,14 @@ namespace TTSLuaExtractor
                 commentedIncludeLine += "\n";
                 // Now commentedIncludeLine should be something like:
                 // ----#include shared/util\n
+                DirectoryInfo info = new DirectoryInfo(includePath);
 
-                string sharedFilePath = Path.Combine(includePath, baseFolder);
+                Console.WriteLine(info.FullName);
+
+
+                
+
+                string sharedFilePath = Path.Join(info.FullName, baseFolder);
 
                 // Extract the base folder from the include file.
                 // For example, if the includeFileName is "shared/util", then
@@ -385,10 +492,10 @@ namespace TTSLuaExtractor
 
                 // Read the contents of the #included LUA file, but uncompress it
                 // so that'll expand any includes it has it in recursively 
-                string sharedFullFile = Path.Combine(sharedFilePath, includeFileName + ".ttslua");
+                string sharedFullFile = Path.Join(sharedFilePath, includeFileName + ".ttslua");
                 FileInfo fi = new FileInfo(sharedFullFile);
                 string sharedFileContents = string.Empty;
-                if ( fi.Exists )
+                if (fi.Exists)
                 {
                     sharedFileContents = File.ReadAllText(sharedFullFile);
                     sharedFileContents = UncompressIncludes(sharedFileContents, newBaseFolder, includePath);
@@ -399,7 +506,7 @@ namespace TTSLuaExtractor
                 }
 
                 // First, remove the "#include file" line
-                if (firstIncludeIndexEOL == -1 )
+                if (firstIncludeIndexEOL == -1)
                 {
                     lua = lua.Remove(firstIncludeIndex);
                 }
@@ -434,7 +541,8 @@ namespace TTSLuaExtractor
                 name = obj.Name;
                 if (name != null)
                 {
-                    name = name.Replace($"_", " "); // for some reason Atom doesn't change '_' to ' ' in nicknames, only names.
+                    name = name.Replace($"_",
+                        " "); // for some reason Atom doesn't change '_' to ' ' in nicknames, only names.
                 }
             }
 
@@ -461,6 +569,18 @@ namespace TTSLuaExtractor
 
             if (hasLua)
             {
+                string GUID = (string) obj.GUID;
+                if (extractedGuids.Contains(GUID))
+                {
+                    Console.WriteLine("Found duplicate GUID with script!");
+                    Console.WriteLine(obj.GUID);
+                    Console.WriteLine(obj.Nickname);
+                    Console.WriteLine(obj.Name);
+                    throw new Exception("Found duplicate GUID with script while extracting .... fix this please");
+                }
+
+                extractedGuids.Add(GUID);
+
                 string outputFile;
                 outputFile = $"{name}.{obj.GUID}.ttslua";
                 foreach (char c in Path.GetInvalidFileNameChars())
